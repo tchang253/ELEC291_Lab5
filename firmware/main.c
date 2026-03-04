@@ -12,6 +12,18 @@
 #define REF_ZC   P2_4   // Vref comparator output -> P2.4
 #define TEST_ZC  P2_5   // Vtest comparator output -> P2.5
 
+// ---------------------------
+// Timer0 overflow extension
+// ---------------------------
+volatile unsigned long t0_overflows = 0;
+
+// Timer0 overflow ISR (interrupt 1)
+void Timer0_ISR(void) interrupt 1
+{
+    TF0 = 0;          // clear overflow flag
+    t0_overflows++;   // count overflows
+}
+
 //timer0 init 
 void TIMER0_Init(void)
 {
@@ -20,6 +32,12 @@ void TIMER0_Init(void)
     TMOD |= 0x01;   // Timer0 mode 1 (16-bit timer), C/T=0
     TH0 = 0;
     TL0 = 0;
+    TF0 = 0;
+
+    t0_overflows = 0;
+
+    ET0 = 1;        // enable Timer0 interrupt
+    EA  = 1;        // global interrupt enable
 }
 
 
@@ -97,56 +115,76 @@ static float Volts_at_Pin(unsigned char pin)
     return ((ADC_at_Pin(pin) * VDD) / 16383.0);
 }
 
-// ---------------------------
 // Timing helpers
-// ---------------------------
-static unsigned int read_T0_ticks(void)
+static unsigned long read_T0_ticks32(void)
 {
-    return (((unsigned int)TH0) << 8) | TL0;
+    unsigned long hi1, hi2;
+    unsigned int lo;
+
+    // Read overflow counter + TH0/TL0 consistently
+    do {
+        hi1 = t0_overflows;
+        lo  = (((unsigned int)TH0) << 8) | TL0;
+        hi2 = t0_overflows;
+    } while (hi1 != hi2);
+
+    return (hi1 << 16) | lo;
 }
 
-// Half-period from REF_ZC: measure high time
-static unsigned int MeasureHalfPeriod_REF(void)
+// Full period from REF_ZC: rising-to-rising (robust, duty-cycle independent)
+static unsigned long MeasurePeriod_REF(void)
 {
-    unsigned int t;
+    unsigned long t;
 
-    TR0 = 0; TH0 = 0; TL0 = 0;
-
-    // Sync to REF rising edge (low -> high)
-    while (REF_ZC == 1);
-    while (REF_ZC == 0);
-
-    TR0 = 1;
-    while (REF_ZC == 1); // wait for falling edge
-    TR0 = 0;
-
-    t = read_T0_ticks();
-    return t;
-}
-
-// Delta ticks: REF rising -> TEST rising
-static unsigned int MeasureDeltaTicks_REF_to_TEST(void)
-{
-    unsigned int dt;
+    TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
 
     // Sync to REF rising edge
     while (REF_ZC == 1);
     while (REF_ZC == 0);
 
-    TR0 = 0; TH0 = 0; TL0 = 0;
+    // Start timing at this rising edge
+    TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
     TR0 = 1;
 
-    while (TEST_ZC == 0); // wait for TEST rising edge
+    // Wait for next REF rising edge (one full period)
+    while (REF_ZC == 1);
+    while (REF_ZC == 0);
 
     TR0 = 0;
-    dt = read_T0_ticks();
+    t = read_T0_ticks32();
+    return t;
+}
+
+// Delta ticks: REF rising -> TEST rising (works for lead/lag)
+static unsigned long MeasureDeltaTicks_REF_to_TEST(void)
+{
+    unsigned long dt;
+
+    // Sync to REF rising edge
+    while (REF_ZC == 1);
+    while (REF_ZC == 0);
+
+    TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
+    TR0 = 1;
+
+    // If TEST is already high (TEST leads), wait for it to go low first
+    if (TEST_ZC == 1)
+    {
+        while (TEST_ZC == 1);
+    }
+
+    // Now wait for the next rising edge of TEST
+    while (TEST_ZC == 0);
+
+    TR0 = 0;
+    dt = read_T0_ticks32();
     return dt;
 }
 
 void main(void)
 {
-    unsigned int half_ticks, period_ticks, delta_ticks;
-    int delta_signed;
+    unsigned long period_ticks, delta_ticks;
+    long delta_signed;
     float phase_deg, freq_hz;
 
     float vref_peak, vtest_peak, vref_rms, vtest_rms;
@@ -172,9 +210,8 @@ void main(void)
 
     while (1)
     {
-        //period from REF_ZC
-        half_ticks = MeasureHalfPeriod_REF();
-        period_ticks = 2UL * half_ticks;
+        // 1) Period from REF_ZC (full period, 32-bit, no overflow issues)
+        period_ticks = MeasurePeriod_REF();
 
         if (period_ticks == 0)
         {
@@ -185,13 +222,13 @@ void main(void)
             continue;
         }
 
-        // 2) Delta ticks REF->TEST
+        // 2) Delta ticks REF->TEST (32-bit)
         delta_ticks = MeasureDeltaTicks_REF_to_TEST();
 
         // 3) Signed wrap correction (lead/lag)
-        delta_signed = (int)delta_ticks;
-        if (delta_ticks > (period_ticks / 2))
-            delta_signed = (int)delta_ticks - (int)period_ticks; // negative if TEST leads
+        delta_signed = (long)delta_ticks;
+        if (delta_ticks > (period_ticks / 2UL))
+            delta_signed = (long)delta_ticks - (long)period_ticks; // negative if TEST leads
 
         // 4) Phase degrees
         phase_deg = ((float)delta_signed * 360.0f) / (float)period_ticks;
@@ -207,12 +244,10 @@ void main(void)
         vtest_rms = vtest_peak / 1.41421356f;
 
         // Serial print
-        printf("Vrms_ref=%6.3f V  Vrms_test=%6.3f V  phase=%7.2f deg  f=%6.2f Hz  (T=%u dt=%d)\r",
+        printf("Vrms_ref=%6.3f V  Vrms_test=%6.3f V  phase=%7.2f deg  f=%6.2f Hz  (T=%lu dt=%ld)\r",
                vref_rms, vtest_rms, phase_deg, freq_hz, period_ticks, delta_signed);
 
         // LCD (16x2)
-        // Line1: R:1.23 T:1.23
-        // Line2: Ph:+12.3 F:60
         memset(line1, 0, sizeof(line1));
         memset(line2, 0, sizeof(line2));
 
