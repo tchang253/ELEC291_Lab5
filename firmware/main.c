@@ -189,6 +189,10 @@ void main(void)
 
     float vref_peak, vtest_peak, vref_rms, vtest_rms;
 
+    // --- CHANGE: diode-drop compensation (measured on scope) ---
+    const float DIODE_DROP = 0.509f; // volts
+    // ----------------------------------------------------------
+
     char line1[17];
     char line2[17];
 
@@ -236,12 +240,12 @@ void main(void)
         // 5) Frequency (Timer0 ticks at SYSCLK/12)
         freq_hz = (float)SYSCLK / (12.0f * (float)period_ticks);
 
-        // 6) ADC peaks -> RMS
+        // 6) ADC peaks -> RMS (with diode-drop compensation)
         vref_peak  = Volts_at_Pin(REF_PEAK_MUX);
         vtest_peak = Volts_at_Pin(TEST_PEAK_MUX);
 
-        vref_rms  = vref_peak  / 1.41421356f;
-        vtest_rms = vtest_peak / 1.41421356f;
+        vref_rms  = (vref_peak  + DIODE_DROP) / 1.41421356f;
+        vtest_rms = (vtest_peak + DIODE_DROP) / 1.41421356f;
 
         // Serial print
         printf("Vrms_ref=%6.3f V  Vrms_test=%6.3f V  phase=%7.2f deg  f=%6.2f Hz  (T=%lu dt=%ld)\r",
