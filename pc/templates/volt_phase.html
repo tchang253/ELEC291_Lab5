@@ -38,11 +38,12 @@
     }
     .dot {
       width: 12px; height: 12px; border-radius: 50%;
-      background: #999;
+      background: #e74c3c;   
       box-shadow: 0 0 0 2px rgba(0,0,0,0.15) inset;
     }
-    .dot.on { background: #2ecc71; }
-    .dot.off { background: #999; }
+
+    .dot.on { background: #2ecc71; }   
+    .dot.off { background: #e74c3c; }  
 
     button {
       border: 2px solid var(--border);
@@ -168,9 +169,18 @@
   <div class="wrap">
     <div class="topbar">
       <h1>Voltage and Phase Meter</h1>
-      <div class="conn">
-        <div id="connDot" class="dot off"></div>
-        <div id="connText">DISCONNECTED</div>
+
+     
+      <div style="display:flex; gap:12px; align-items:center;">
+        <div class="conn">
+          <div id="connDot" class="dot off"></div>
+          <div id="connText">DISCONNECTED</div>
+        </div>
+
+        <div class="conn">
+          <div id="runDot" class="dot off"></div>
+          <div id="runText">STOPPED</div>
+        </div>
       </div>
     </div>
 
@@ -266,6 +276,18 @@
     }
   }
 
+  function setRunning(isOn) {
+    const dot = document.getElementById("runDot");
+    const txt = document.getElementById("runText");
+    if (isOn) {
+      dot.classList.add("on"); dot.classList.remove("off");
+      txt.textContent = "RUNNING";
+    } else {
+      dot.classList.add("off"); dot.classList.remove("on");
+      txt.textContent = "STOPPED";
+    }
+  }
+
   function clearLive() {
     document.getElementById("refVrms").textContent   = "—";
     document.getElementById("testVrms").textContent  = "—";
@@ -313,6 +335,7 @@
     const j = await r.json();
     if (j.ok) {
       isRunning = true;
+      setRunning(true);   // CHANGED
       lastSeq = -1;
       clearLive();
     } else {
@@ -324,7 +347,7 @@
     const r = await fetch("/api/stop", { method: "POST" });
     await r.json();
     isRunning = false;
-    clearLive();
+    setRunning(false);   
   }
 
   function downloadCsv() { window.location = "/api/export"; }
@@ -372,6 +395,8 @@
 
   document.getElementById("phaseUnitBtn").textContent = phaseUnit;
   document.getElementById("phaseUnit").textContent = phaseUnit;
+
+  setRunning(false);
 
   setInterval(pollLatest, POLL_MS);
 </script>
