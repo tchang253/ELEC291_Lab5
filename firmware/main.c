@@ -287,7 +287,7 @@ void main(void)
             delta_signed = (long)delta_ticks - (long)period_ticks; // negative if TEST leads
 
         // 4) Phase degrees (TEST relative to REF: positive = TEST lags REF, negative = TEST leads REF)
-        phase_deg = ((float)delta_signed * 360.0f) / (float)period_ticks;
+        phase_deg = -((float)delta_signed * 360.0f) / (float)period_ticks;
         while (phase_deg > 180.0f)  phase_deg -= 360.0f;
 		while (phase_deg < -180.0f) phase_deg += 360.0f;
 
