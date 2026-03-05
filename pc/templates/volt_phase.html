@@ -1,0 +1,398 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voltage and Phase Meter</title>
+
+  <style>
+    :root {
+      --bg: #f4f4f2;
+      --panel: #ffffff;
+      --border: #222;
+      --muted: #666;
+    }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: #111;
+    }
+
+    .wrap { max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+    h1 { margin: 0 0 14px 0; font-size: 28px; }
+
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+      gap: 12px;
+    }
+
+    .conn {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; border: 2px solid var(--border); background: var(--panel);
+      border-radius: 8px;
+      font-weight: 800;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: #999;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.15) inset;
+    }
+    .dot.on { background: #2ecc71; }
+    .dot.off { background: #999; }
+
+    button {
+      border: 2px solid var(--border);
+      background: var(--panel);
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: 800;
+      user-select: none;
+    }
+    button:active { transform: translateY(1px); }
+    button.primary { background: #eafff1; }
+    button.danger  { background: #fff0f0; }
+
+    .grid3 {
+      display: grid;
+      grid-template-columns: 1fr 0.9fr 1fr;
+      gap: 18px;
+      align-items: stretch;
+      margin: 12px 0 18px;
+    }
+
+    .panel {
+      border: 2px solid var(--border);
+      background: var(--panel);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .panel h2 { margin: 0 0 4px; font-size: 18px; }
+    .sub { color: var(--muted); font-weight: 800; margin-bottom: 12px; }
+
+    .liveBox {
+      border: 2px solid #bbb; border-radius: 10px;
+      padding: 18px;
+      background: #fafafa;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    .numTabular { font-variant-numeric: tabular-nums; }
+
+    .bigVal {
+      font-weight: 900;
+      font-size: 46px;
+      line-height: 1;
+      letter-spacing: 0.2px;
+    }
+    .unitGlue { margin-left: 0; }
+
+    .bigNumFixed {
+      display: inline-block;
+      width: 7ch;         /* "0000.000" */
+      text-align: right;
+    }
+
+    .kvs {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .kv {
+      border: 2px solid #bbb;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fafafa;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+
+    .kv .name {
+      color: var(--muted);
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .kv .val {
+      font-weight: 900;
+      font-size: 20px;
+      white-space: nowrap;
+    }
+
+    .actionRow {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin: 10px 0 18px;
+      flex-wrap: wrap;
+    }
+
+    .miniBtn {
+      padding: 8px 14px;
+      font-size: 14px;
+      border-radius: 8px;
+    }
+
+    .phaseTopRow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    /* NEW: small label above big voltage number */
+    .readLabel {
+      color: var(--muted);
+      font-weight: 900;
+      margin: 2px 0 8px;
+    }
+
+    @media (max-width: 900px) {
+      .grid3 { grid-template-columns: 1fr; }
+      .conn { width: 100%; justify-content: center; }
+      .topbar { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>Voltage and Phase Meter</h1>
+      <div class="conn">
+        <div id="connDot" class="dot off"></div>
+        <div id="connText">DISCONNECTED</div>
+      </div>
+    </div>
+
+    <div class="grid3">
+      <!-- LEFT: Reference (fixed) -->
+      <div class="panel">
+        <h2>Reference Signal Live</h2>
+
+        <div class="readLabel">RMS Voltage</div>
+        <div class="liveBox numTabular">
+          <span id="refVrms" class="bigVal bigNumFixed">—</span><span class="bigVal unitGlue">V</span>
+        </div>
+
+        <div class="kvs numTabular">
+          <div class="kv">
+            <div class="name">Peak Voltage</div>
+            <div><span id="refVpeak" class="val">—</span><span class="val"> V</span></div>
+          </div>
+          <div class="kv">
+            <div class="name">Frequency</div>
+            <div><span id="refFreq" class="val">—</span><span class="val"> Hz</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MIDDLE: Phase -->
+      <div class="panel">
+        <div class="phaseTopRow">
+          <div>
+            <h2>Phase Difference</h2>
+            <div class="sub">Test relative to Reference</div>
+          </div>
+          <button id="phaseUnitBtn" class="miniBtn" onclick="togglePhaseUnit()">deg</button>
+        </div>
+
+        <div class="liveBox numTabular">
+          <span id="phaseVal" class="bigVal bigNumFixed">—</span><span id="phaseUnit" class="bigVal unitGlue">deg</span>
+        </div>
+
+        <div class="kvs numTabular">
+          <div class="kv" style="flex-direction: column; align-items: flex-start;">
+            <div class="name">Meaning</div>
+            <div style="font-size:14px; font-weight:800; color:#111; line-height:1.35; text-align:left;">
+              Positive indicates TEST lags REF<br>
+              Negative indicates TEST leads REF
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Test (fixed) -->
+      <div class="panel">
+        <h2>Test Signal Live</h2>
+
+        <div class="readLabel">RMS Voltage</div>
+        <div class="liveBox numTabular">
+          <span id="testVrms" class="bigVal bigNumFixed">—</span><span class="bigVal unitGlue">V</span>
+        </div>
+
+        <div class="kvs numTabular">
+          <div class="kv">
+            <div class="name">Peak Voltage</div>
+            <div><span id="testVpeak" class="val">—</span><span class="val"> V</span></div>
+          </div>
+          <div class="kv">
+            <div class="name">Frequency</div>
+            <div><span id="testFreq" class="val">—</span><span class="val"> Hz</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="actionRow">
+      <button class="primary" onclick="startRun()">START</button>
+      <button class="danger" onclick="stopRun()">STOP</button>
+      <button onclick="downloadCsv()">Save File</button>
+    </div>
+  </div>
+
+<script>
+  const POLL_MS = 150;
+
+  let lastSeq = -1;
+  let isRunning = false;
+
+  // phase display unit requested from backend ("deg" or "rad")
+  let phaseUnit = "deg";
+
+  function setConnected(isOn) {
+    const dot = document.getElementById("connDot");
+    const txt = document.getElementById("connText");
+    if (isOn) {
+      dot.classList.add("on"); dot.classList.remove("off");
+      txt.textContent = "CONNECTED";
+    } else {
+      dot.classList.add("off"); dot.classList.remove("on");
+      txt.textContent = "DISCONNECTED";
+    }
+  }
+
+  function clearLive() {
+    document.getElementById("refVrms").textContent   = "—";
+    document.getElementById("testVrms").textContent  = "—";
+    document.getElementById("refVpeak").textContent  = "—";
+    document.getElementById("testVpeak").textContent = "—";
+    document.getElementById("refFreq").textContent   = "—";
+    document.getElementById("testFreq").textContent  = "—";
+    document.getElementById("phaseVal").textContent  = "—";
+  }
+
+  function fmt(n, digits) {
+    const x = Number(n);
+    if (!isFinite(x)) return "—";
+    return x.toFixed(digits);
+  }
+
+  async function applyConfig() {
+    // IMPORTANT: This should ONLY apply config; NEVER start
+    const payload = {
+      source: "file",
+      phase_unit: phaseUnit
+    };
+
+    await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async function togglePhaseUnit() {
+    phaseUnit = (phaseUnit === "deg") ? "rad" : "deg";
+
+    // Update button + unit label immediately (backend will match on next poll)
+    document.getElementById("phaseUnitBtn").textContent = phaseUnit;
+    document.getElementById("phaseUnit").textContent = phaseUnit;
+
+    // Apply config but DO NOT start
+    try {
+      await applyConfig();
+    } catch (e) {
+      // If config fails, revert locally
+      phaseUnit = (phaseUnit === "deg") ? "rad" : "deg";
+      document.getElementById("phaseUnitBtn").textContent = phaseUnit;
+      document.getElementById("phaseUnit").textContent = phaseUnit;
+    }
+  }
+
+  async function startRun() {
+    // START applies config first, THEN starts reading/logging
+    await applyConfig();
+
+    const r = await fetch("/api/start", { method: "POST" });
+    const j = await r.json();
+    if (j.ok) {
+      isRunning = true;
+      lastSeq = -1;
+      clearLive();
+    } else {
+      alert("START failed: " + (j.reason || "unknown"));
+    }
+  }
+
+  async function stopRun() {
+    const r = await fetch("/api/stop", { method: "POST" });
+    await r.json();
+    isRunning = false;
+    clearLive();
+  }
+
+  function downloadCsv() { window.location = "/api/export"; }
+
+  async function pollLatest() {
+    try {
+      const r = await fetch("/api/latest");
+      const s = await r.json();
+      setConnected(!!s.connected);
+
+      // keep UI phase unit synced to backend (authoritative)
+      if (s.phase_unit === "deg" || s.phase_unit === "rad") {
+        phaseUnit = s.phase_unit;
+        document.getElementById("phaseUnitBtn").textContent = phaseUnit;
+        document.getElementById("phaseUnit").textContent = phaseUnit;
+      }
+
+      if (!isRunning) return;
+
+      if (s.seq !== undefined && s.seq === lastSeq) return;
+      if (s.seq !== undefined) lastSeq = s.seq;
+
+      // Expect these fields from the Lab 5 backend
+      const vr  = s.vrms_ref;
+      const vt  = s.vrms_test;
+      const vpr = s.vpeak_ref;
+      const vpt = s.vpeak_test;
+      const f   = s.freq_hz;   // locked, but we show in both panels
+      const ph  = s.phase;     // already in selected unit
+
+      document.getElementById("refVrms").textContent   = fmt(vr, 3);
+      document.getElementById("testVrms").textContent  = fmt(vt, 3);
+
+      document.getElementById("refVpeak").textContent  = fmt(vpr, 3);
+      document.getElementById("testVpeak").textContent = fmt(vpt, 3);
+
+      document.getElementById("refFreq").textContent   = fmt(f, 2);
+      document.getElementById("testFreq").textContent  = fmt(f, 2);
+
+      // phase precision: deg -> 1 decimal, rad -> 3 decimals
+      const phDigits = (phaseUnit === "rad") ? 3 : 1;
+      document.getElementById("phaseVal").textContent = fmt(ph, phDigits);
+
+    } catch (e) {
+      setConnected(false);
+    }
+  }
+
+  // Init unit label
+  document.getElementById("phaseUnitBtn").textContent = phaseUnit;
+  document.getElementById("phaseUnit").textContent = phaseUnit;
+
+  setInterval(pollLatest, POLL_MS);
+</script>
+</body>
+</html>

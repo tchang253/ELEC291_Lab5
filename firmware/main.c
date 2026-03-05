@@ -273,7 +273,7 @@ void main(void)
         {
             LCDprint("No REF ZC", 1, 1);
             LCDprint("Check P2.4", 2, 1);
-            printf("ERROR: period_ticks=0 (no REF_ZC?)\r");
+            printf("ERROR: period_ticks=0 (no REF_ZC?)\r\n");
             waitms(250);
             continue;
         }
@@ -286,12 +286,12 @@ void main(void)
         if (delta_ticks > (period_ticks / 2UL))
             delta_signed = (long)delta_ticks - (long)period_ticks; // negative if TEST leads
 
-        // 4) Phase degrees
+        // 4) Phase degrees (TEST relative to REF: positive = TEST lags REF, negative = TEST leads REF)
         phase_deg = ((float)delta_signed * 360.0f) / (float)period_ticks;
         while (phase_deg > 180.0f)  phase_deg -= 360.0f;
 		while (phase_deg < -180.0f) phase_deg += 360.0f;
 
-        // 5) Frequency (Timer0 ticks at SYSCLK/12)
+        // 5) Frequency (measured from REF period; REF and TEST are locked at same frequency)
         freq_hz = (float)SYSCLK / (12.0f * (float)period_ticks);
 
         // 6) ADC peaks -> RMS (with diode-drop compensation)
@@ -301,10 +301,9 @@ void main(void)
         vref_rms  = (vref_peak  + DIODE_DROP) / 1.41421356237f;
         vtest_rms = (vtest_peak + DIODE_DROP) / 1.41421356237f;
 
-        // Serial print
-        printf("vref_peak=%6.3f  vref_rms=%6.3f\r", vtest_peak, vtest_rms);
-        //printf("Vrms_ref=%6.3f V  Vrms_test=%6.3f V  phase=%7.2f deg  f=%6.2f Hz  (T=%lu dt=%ld)\r",
-               //vref_rms, vtest_rms, phase_deg, freq_hz, period_ticks, delta_signed);
+        // Serial print (Vrms_ref, Vrms_test, phase, frequency)
+        printf("Vrms_ref=%6.3f V  Vrms_test=%6.3f V  phase=%+6.1f deg  f=%6.2f Hz\r\n",
+               vref_rms, vtest_rms, phase_deg, freq_hz);
 
         // LCD (16x2)
         memset(line1, 0, sizeof(line1));
