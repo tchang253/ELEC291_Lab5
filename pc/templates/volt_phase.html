@@ -38,12 +38,12 @@
     }
     .dot {
       width: 12px; height: 12px; border-radius: 50%;
-      background: #e74c3c;   
+      background: #e74c3c;
       box-shadow: 0 0 0 2px rgba(0,0,0,0.15) inset;
     }
 
-    .dot.on { background: #2ecc71; }   
-    .dot.off { background: #e74c3c; }  
+    .dot.on { background: #2ecc71; }
+    .dot.off { background: #e74c3c; }
 
     button {
       border: 2px solid var(--border);
@@ -157,6 +157,16 @@
       margin: 2px 0 8px;
     }
 
+    /* Simple scope look (static, no motion) */
+    #scopeCanvas{
+      width:100%;
+      height:auto;
+      display:block;
+      background:#050607;
+      border-radius:10px;
+      border:1px solid #111;
+    }
+
     @media (max-width: 900px) {
       .grid3 { grid-template-columns: 1fr; }
       .conn { width: 100%; justify-content: center; }
@@ -170,7 +180,6 @@
     <div class="topbar">
       <h1>Voltage and Phase Meter</h1>
 
-     
       <div style="display:flex; gap:12px; align-items:center;">
         <div class="conn">
           <div id="connDot" class="dot off"></div>
@@ -222,8 +231,8 @@
           <div class="kv" style="flex-direction: column; align-items: flex-start;">
             <div class="name">Meaning</div>
             <div style="font-size:14px; font-weight:800; color:#111; line-height:1.35; text-align:left;">
-              Positive indicates TEST lags REF<br>
-              Negative indicates TEST leads REF
+              Positive indicates TEST leads REF<br>
+              Negative indicates TEST lags REF
             </div>
           </div>
         </div>
@@ -254,6 +263,13 @@
       <button class="primary" onclick="startRun()">START</button>
       <button class="danger" onclick="stopRun()">STOP</button>
       <button onclick="downloadCsv()">Save File</button>
+    </div>
+
+    <!-- Oscilloscope widget (STATIC, below the buttons) -->
+    <div class="panel" style="margin-top:18px;">
+      <h2>Signal View</h2>
+      <div class="sub">Reconstructed from RMS Voltage and Phase</div>
+      <canvas id="scopeCanvas" width="1000" height="260"></canvas>
     </div>
   </div>
 
@@ -296,6 +312,9 @@
     document.getElementById("refFreq").textContent   = "—";
     document.getElementById("testFreq").textContent  = "—";
     document.getElementById("phaseVal").textContent  = "—";
+
+    // clear scope too
+    drawScope(NaN, NaN, NaN);
   }
 
   function fmt(n, digits) {
@@ -335,7 +354,7 @@
     const j = await r.json();
     if (j.ok) {
       isRunning = true;
-      setRunning(true);   // CHANGED
+      setRunning(true);
       lastSeq = -1;
       clearLive();
     } else {
@@ -347,10 +366,100 @@
     const r = await fetch("/api/stop", { method: "POST" });
     await r.json();
     isRunning = false;
-    setRunning(false);   
+    setRunning(false);
   }
 
   function downloadCsv() { window.location = "/api/export"; }
+
+  // ----- STATIC oscilloscope widget -----
+  // Draws 2 cycles of the reference sine + test sine (phase shifted). No movement.
+  // If phaseUnit is "rad", we convert to degrees first (since this expects degrees).
+  function drawScope(vrms_ref, vrms_test, phase_val) {
+    const canvas = document.getElementById("scopeCanvas");
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Background
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#050607";
+    ctx.fillRect(0, 0, w, h);
+
+    // If invalid data, just draw a faint center line
+    if (!isFinite(vrms_ref) || !isFinite(vrms_test) || !isFinite(phase_val)) {
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.beginPath();
+      ctx.moveTo(0, h/2);
+      ctx.lineTo(w, h/2);
+      ctx.stroke();
+      return;
+    }
+
+    // Draw simple grid (scope-ish)
+    const gridX = 10, gridY = 8;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+    for (let i = 0; i <= gridX; i++) {
+      const x = (i / gridX) * w;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    for (let j = 0; j <= gridY; j++) {
+      const y = (j / gridY) * h;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+
+    const samples = 600;
+
+    const vpk_ref  = vrms_ref * Math.SQRT2;
+    const vpk_test = vrms_test * Math.SQRT2;
+
+    // Convert phase to radians for drawing.
+    // Backend sends s.phase in the selected unit (deg or rad).
+    let phaseRad;
+    if (phaseUnit === "rad") phaseRad = phase_val;
+    else phaseRad = phase_val * Math.PI / 180;
+
+    // Auto vertical scaling
+    const maxV = Math.max(vpk_ref, vpk_test, 0.01);
+    const scale = (h / 2) / (maxV * 1.2);
+
+    function vToY(v) {
+      return (h / 2) - (v * scale);
+    }
+
+    // Draw 2 cycles across the width: theta from 0..4π
+    const thetaSpan = 4 * Math.PI;
+
+    // Reference trace (green)
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#00ff88";
+    ctx.beginPath();
+    for (let i = 0; i < samples; i++) {
+      const x = (i / (samples - 1)) * w;
+      const theta = (i / (samples - 1)) * thetaSpan;
+      const y = vToY(vpk_ref * Math.sin(theta));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Test trace (blue)
+    ctx.strokeStyle = "#3aa3ff";
+    ctx.beginPath();
+    for (let i = 0; i < samples; i++) {
+      const x = (i / (samples - 1)) * w;
+      const theta = (i / (samples - 1)) * thetaSpan;
+      const y = vToY(vpk_test * Math.sin(theta + phaseRad));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  // --------------------------------------
 
   async function pollLatest() {
     try {
@@ -388,6 +497,9 @@
       const phDigits = (phaseUnit === "rad") ? 3 : 1;
       document.getElementById("phaseVal").textContent  = fmt(ph, phDigits);
 
+      // Update static scope
+      drawScope(Number(vr), Number(vt), Number(ph));
+
     } catch (e) {
       setConnected(false);
     }
@@ -397,6 +509,9 @@
   document.getElementById("phaseUnit").textContent = phaseUnit;
 
   setRunning(false);
+
+  // Draw empty scope at startup
+  drawScope(NaN, NaN, NaN);
 
   setInterval(pollLatest, POLL_MS);
 </script>

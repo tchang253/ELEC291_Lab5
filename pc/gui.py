@@ -10,11 +10,11 @@ import os
 
 
 # Serial / Fake config
-USE_FAKE_SERIAL = True
+USE_FAKE_SERIAL = False
 FAKE_FILE = "fake_serial.txt"
 FAKE_PERIOD_S = 0.10  # seconds/sample
 
-SERIAL_PORT = "COM4"
+SERIAL_PORT = "COM5"
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT_S = 1
 
