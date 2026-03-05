@@ -95,7 +95,7 @@
 
     .bigNumFixed {
       display: inline-block;
-      width: 7ch;         /* "0000.000" */
+      width: 7ch;
       text-align: right;
     }
 
@@ -150,7 +150,6 @@
       margin-bottom: 10px;
     }
 
-    /* NEW: small label above big voltage number */
     .readLabel {
       color: var(--muted);
       font-weight: 900;
@@ -176,7 +175,6 @@
     </div>
 
     <div class="grid3">
-      <!-- LEFT: Reference (fixed) -->
       <div class="panel">
         <h2>Reference Signal Live</h2>
 
@@ -197,7 +195,6 @@
         </div>
       </div>
 
-      <!-- MIDDLE: Phase -->
       <div class="panel">
         <div class="phaseTopRow">
           <div>
@@ -222,7 +219,6 @@
         </div>
       </div>
 
-      <!-- RIGHT: Test (fixed) -->
       <div class="panel">
         <h2>Test Signal Live</h2>
 
@@ -256,8 +252,6 @@
 
   let lastSeq = -1;
   let isRunning = false;
-
-  // phase display unit requested from backend ("deg" or "rad")
   let phaseUnit = "deg";
 
   function setConnected(isOn) {
@@ -289,11 +283,7 @@
   }
 
   async function applyConfig() {
-    // IMPORTANT: This should ONLY apply config; NEVER start
-    const payload = {
-      source: "file",
-      phase_unit: phaseUnit
-    };
+    const payload = { phase_unit: phaseUnit };
 
     await fetch("/api/config", {
       method: "POST",
@@ -304,16 +294,12 @@
 
   async function togglePhaseUnit() {
     phaseUnit = (phaseUnit === "deg") ? "rad" : "deg";
-
-    // Update button + unit label immediately (backend will match on next poll)
     document.getElementById("phaseUnitBtn").textContent = phaseUnit;
     document.getElementById("phaseUnit").textContent = phaseUnit;
 
-    // Apply config but DO NOT start
     try {
       await applyConfig();
     } catch (e) {
-      // If config fails, revert locally
       phaseUnit = (phaseUnit === "deg") ? "rad" : "deg";
       document.getElementById("phaseUnitBtn").textContent = phaseUnit;
       document.getElementById("phaseUnit").textContent = phaseUnit;
@@ -321,7 +307,6 @@
   }
 
   async function startRun() {
-    // START applies config first, THEN starts reading/logging
     await applyConfig();
 
     const r = await fetch("/api/start", { method: "POST" });
@@ -350,7 +335,6 @@
       const s = await r.json();
       setConnected(!!s.connected);
 
-      // keep UI phase unit synced to backend (authoritative)
       if (s.phase_unit === "deg" || s.phase_unit === "rad") {
         phaseUnit = s.phase_unit;
         document.getElementById("phaseUnitBtn").textContent = phaseUnit;
@@ -362,13 +346,12 @@
       if (s.seq !== undefined && s.seq === lastSeq) return;
       if (s.seq !== undefined) lastSeq = s.seq;
 
-      // Expect these fields from the Lab 5 backend
       const vr  = s.vrms_ref;
       const vt  = s.vrms_test;
       const vpr = s.vpeak_ref;
       const vpt = s.vpeak_test;
-      const f   = s.freq_hz;   // locked, but we show in both panels
-      const ph  = s.phase;     // already in selected unit
+      const f   = s.freq_hz;
+      const ph  = s.phase;
 
       document.getElementById("refVrms").textContent   = fmt(vr, 3);
       document.getElementById("testVrms").textContent  = fmt(vt, 3);
@@ -379,16 +362,14 @@
       document.getElementById("refFreq").textContent   = fmt(f, 2);
       document.getElementById("testFreq").textContent  = fmt(f, 2);
 
-      // phase precision: deg -> 1 decimal, rad -> 3 decimals
       const phDigits = (phaseUnit === "rad") ? 3 : 1;
-      document.getElementById("phaseVal").textContent = fmt(ph, phDigits);
+      document.getElementById("phaseVal").textContent  = fmt(ph, phDigits);
 
     } catch (e) {
       setConnected(false);
     }
   }
 
-  // Init unit label
   document.getElementById("phaseUnitBtn").textContent = phaseUnit;
   document.getElementById("phaseUnit").textContent = phaseUnit;
 
