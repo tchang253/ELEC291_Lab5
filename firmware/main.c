@@ -130,7 +130,28 @@ static unsigned long read_T0_ticks32(void)
 
     return (hi1 << 16) | lo;
 }
+#define STABLE_COUNT 32   // try 32, bump to 64 if needed
 
+static void wait_REF_low_stable(void)
+{
+    unsigned int n = 0;
+    while(n < STABLE_COUNT) { if(REF_ZC) n = 0; else n++; }
+}
+static void wait_REF_high_stable(void)
+{
+    unsigned int n = 0;
+    while(n < STABLE_COUNT) { if(REF_ZC) n++; else n = 0; }
+}
+static void wait_TEST_low_stable(void)
+{
+    unsigned int n = 0;
+    while(n < STABLE_COUNT) { if(TEST_ZC) n = 0; else n++; }
+}
+static void wait_TEST_high_stable(void)
+{
+    unsigned int n = 0;
+    while(n < STABLE_COUNT) { if(TEST_ZC) n++; else n = 0; }
+}
 // Full period from REF_ZC: rising-to-rising (robust, duty-cycle independent)
 static unsigned long MeasurePeriod_REF(void)
 {
@@ -138,17 +159,17 @@ static unsigned long MeasurePeriod_REF(void)
 
     TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
 
-    // Sync to REF rising edge
-    while (REF_ZC == 1);
-    while (REF_ZC == 0);
+    // Sync to REF rising edge (stable)
+wait_REF_low_stable();
+wait_REF_high_stable();
 
-    // Start timing at this rising edge
-    TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
-    TR0 = 1;
+// Start timing at this rising edge
+TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
+TR0 = 1;
 
-    // Wait for next REF rising edge (one full period)
-    while (REF_ZC == 1);
-    while (REF_ZC == 0);
+// Wait for next REF rising edge (one full period), stable
+wait_REF_low_stable();
+wait_REF_high_stable();
 
     TR0 = 0;
     t = read_T0_ticks32();
@@ -160,25 +181,56 @@ static unsigned long MeasureDeltaTicks_REF_to_TEST(void)
 {
     unsigned long dt;
 
-    // Sync to REF rising edge
-    while (REF_ZC == 1);
-    while (REF_ZC == 0);
+    // Sync to REF rising edge (stable)
+wait_REF_low_stable();
+wait_REF_high_stable();
 
-    TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
-    TR0 = 1;
+TR0 = 0; TH0 = 0; TL0 = 0; TF0 = 0; t0_overflows = 0;
+TR0 = 1;
 
-    // If TEST is already high (TEST leads), wait for it to go low first
-    if (TEST_ZC == 1)
+// If TEST is already high (TEST leads), wait for it to go low first (stable)
+if (TEST_ZC == 1)
+{
+    wait_TEST_low_stable();
+}
+
+// Now wait for the next rising edge of TEST (stable)
+wait_TEST_high_stable();
+
+TR0 = 0;
+dt = read_T0_ticks32();
+return dt;
+}
+static unsigned int median3(unsigned int a, unsigned int b, unsigned int c)
+{
+    if(a > b) { unsigned int t = a; a = b; b = t; }
+    if(b > c) { unsigned int t = b; b = c; c = t; }
+    if(a > b) { unsigned int t = a; a = b; b = t; }
+    return b; // median
+}
+
+static float Peak_Volts_at_Pin(unsigned char pin)
+{
+    unsigned int i;
+    unsigned int a, b, c;
+    unsigned int m;
+    unsigned int max_m = 0;
+
+    for(i = 0; i < 40; i++)
     {
-        while (TEST_ZC == 1);
+        a = ADC_at_Pin(pin);
+        b = ADC_at_Pin(pin);
+        c = ADC_at_Pin(pin);
+
+        m = median3(a, b, c);
+
+        if(m > max_m)
+            max_m = m;
+
+        waitms(1);
     }
 
-    // Now wait for the next rising edge of TEST
-    while (TEST_ZC == 0);
-
-    TR0 = 0;
-    dt = read_T0_ticks32();
-    return dt;
+    return ((max_m * VDD) / 16383.0);
 }
 
 void main(void)
@@ -190,7 +242,7 @@ void main(void)
     float vref_peak, vtest_peak, vref_rms, vtest_rms;
 
     // --- CHANGE: diode-drop compensation (measured on scope) ---
-    const float DIODE_DROP = 0.509f; // volts
+    const float DIODE_DROP = 0.20f; // volts
     // ----------------------------------------------------------
 
     char line1[17];
@@ -236,26 +288,29 @@ void main(void)
 
         // 4) Phase degrees
         phase_deg = ((float)delta_signed * 360.0f) / (float)period_ticks;
+        while (phase_deg > 180.0f)  phase_deg -= 360.0f;
+		while (phase_deg < -180.0f) phase_deg += 360.0f;
 
         // 5) Frequency (Timer0 ticks at SYSCLK/12)
         freq_hz = (float)SYSCLK / (12.0f * (float)period_ticks);
 
         // 6) ADC peaks -> RMS (with diode-drop compensation)
-        vref_peak  = Volts_at_Pin(REF_PEAK_MUX);
-        vtest_peak = Volts_at_Pin(TEST_PEAK_MUX);
+        vref_peak  = Peak_Volts_at_Pin(REF_PEAK_MUX);
+		vtest_peak = Peak_Volts_at_Pin(TEST_PEAK_MUX);
 
-        vref_rms  = (vref_peak  + DIODE_DROP) / 1.41421356f;
-        vtest_rms = (vtest_peak + DIODE_DROP) / 1.41421356f;
+        vref_rms  = (vref_peak  + DIODE_DROP) / 1.41421356237f;
+        vtest_rms = (vtest_peak + DIODE_DROP) / 1.41421356237f;
 
         // Serial print
-        printf("Vrms_ref=%6.3f V  Vrms_test=%6.3f V  phase=%7.2f deg  f=%6.2f Hz  (T=%lu dt=%ld)\r",
-               vref_rms, vtest_rms, phase_deg, freq_hz, period_ticks, delta_signed);
+        printf("vref_peak=%6.3f  vref_rms=%6.3f\r", vtest_peak, vtest_rms);
+        //printf("Vrms_ref=%6.3f V  Vrms_test=%6.3f V  phase=%7.2f deg  f=%6.2f Hz  (T=%lu dt=%ld)\r",
+               //vref_rms, vtest_rms, phase_deg, freq_hz, period_ticks, delta_signed);
 
         // LCD (16x2)
         memset(line1, 0, sizeof(line1));
         memset(line2, 0, sizeof(line2));
 
-        sprintf(line1, "R:%1.2f T:%1.2f", vref_rms, vtest_rms);
+        sprintf(line1, "R:%1.3f  T:%1.3f", vref_rms, vtest_rms);
         sprintf(line2, "Ph:%+5.1f F:%2.0f", phase_deg, freq_hz);
 
         LCDprint(line1, 1, 1);
